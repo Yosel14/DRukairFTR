@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drukair Helicopter - Flight Time Report (FTR) System</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style type="text/tailwindcss">
+@layer components {
+  .lbl{@apply block text-xs font-semibold text-slate-600 uppercase mb-1}
+  .inp{@apply w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none}
+  .btn{@apply px-4 py-2 rounded-lg text-sm font-semibold transition-colors}
+  .card{@apply bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden}
+  .bar{@apply bg-slate-900 text-white px-5 py-4 flex justify-between items-center gap-3 flex-wrap}
+  .th{@apply px-3 py-3 text-left}
+  .td{@apply px-3 py-2.5 align-top}
+  .badge{@apply px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap}
+  .ic{@apply p-1.5 rounded hover:bg-slate-100}
+}
+</style>
+<style>
+body{font-family:'Inter',sans-serif}
+@media print{
+  body *{visibility:hidden}
+  #print-area,#print-area *,#inv-area,#inv-area *{visibility:visible}
+  #print-modal:not(.hidden),#inv-modal:not(.hidden){position:absolute!important;inset:0;display:block!important;background:#fff!important;padding:0!important}
+  #print-modal:not(.hidden)>div,#inv-modal:not(.hidden)>div{max-height:none!important;overflow:visible!important;box-shadow:none!important;max-width:none!important}
+  #inv-area{margin:0!important;border:0!important;padding:0!important}
+  @page{size:A4;margin:12mm}
+  .no-print{display:none!important}
+}
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+
+<header class="bg-slate-900 text-white shadow-lg border-b border-amber-500/30 sticky top-0 z-30">
+  <div class="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-lg bg-amber-500 flex items-center justify-center text-xl">🚁</div>
+      <div>
+        <h1 class="font-bold leading-tight tracking-wide">DRUKAIR HELICOPTER SERVICES</h1>
+        <p class="text-xs text-amber-400">Flight Operations Dispatch · Flight Time Report (FTR)</p>
+      </div>
+    </div>
+    <nav id="nav" class="flex gap-1 overflow-x-auto"></nav>
+    <div class="text-xs text-slate-300 flex items-center gap-2"><span id="who"></span><button onclick="sb.auth.signOut().then(()=>location.reload())" class="btn bg-slate-700 hover:bg-slate-600 text-xs">Sign out</button></div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-6">
+
+<!-- ENTRY -->
+<section id="tab-entry">
+  <div class="card">
+    <div class="bar border-b border-amber-500/40">
+      <div><h2 class="text-lg font-bold">New Flight Time Entry</h2><p class="text-xs text-slate-400">Log the flight, then record how it is being paid.</p></div>
+    </div>
+    <form id="ftr-form" onsubmit="submitForm(event)" class="p-5 space-y-5">
+      <input type="hidden" id="edit-id">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div><label class="lbl">SL. No. / FTR No.</label><input id="ftr-sl" required class="inp font-mono font-semibold bg-slate-50"></div>
+        <div><label class="lbl">Flight Date</label><input type="date" id="ftr-date" required class="inp"></div>
+        <div><label class="lbl">Chopper Registration</label><select id="ftr-chopper" class="inp font-semibold"></select></div>
+        <div><label class="lbl">Service Type</label><select id="ftr-service" onchange="calcForm()" class="inp"></select></div>
+        <div><label class="lbl">CAP (Captain)</label><select id="ftr-cap" class="inp"></select></div>
+        <div>
+          <label class="lbl">Flight Time</label>
+          <div class="grid grid-cols-2 gap-2">
+            <input type="number" id="ftr-hours" min="0" max="24" value="1" oninput="calcForm()" class="inp" title="Hours">
+            <input type="number" id="ftr-mins" min="0" max="59" value="50" oninput="calcForm()" class="inp" title="Minutes">
+          </div>
+        </div>
+        <div>
+          <label class="lbl">Total Time</label>
+          <div class="inp bg-slate-100 flex justify-between items-center"><b id="ftr-formatted-time">1:50:00</b><span id="ftr-computed-mins" class="text-xs font-mono text-blue-800">(110 Mins)</span></div>
+        </div>
+        <div>
+          <label class="lbl">Calculated Revenue (incl. GST)</label>
+          <div class="relative"><input id="ftr-revenue-display" readonly class="inp border-emerald-300 bg-emerald-50 text-emerald-900 font-bold"><span id="ftr-currency-badge" class="absolute right-2 top-2 bg-emerald-200 text-emerald-800 text-xs px-2 py-0.5 rounded font-bold">USD</span></div>
+          <p id="ftr-gst-note" class="text-[10px] text-slate-500 mt-1"></p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+        <div><label class="lbl">Origin / From</label><input id="ftr-from" required placeholder="e.g. Paro / Bumthang" class="inp"></div>
+        <div><label class="lbl">Destination / To</label><input id="ftr-to" required placeholder="e.g. Lunana / Gelephu" class="inp"></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div><label class="lbl">Agency / Client</label><input id="ftr-agency" required placeholder="e.g. YU-DRUK TOURS & TREKS / MOH" class="inp"></div>
+        <div><label class="lbl">Contact Phone</label><input id="ftr-phone" placeholder="e.g. 17444917" class="inp"></div>
+        <div><label class="lbl">Flight Status</label><select id="ftr-status" class="inp font-medium"></select></div>
+      </div>
+      <div><label class="lbl">Billing Address / Tax ID (printed on invoice)</label><input id="ftr-billing" class="inp" placeholder="e.g. Krucza 24/26, 00526 Warsaw, TAX Id: 677-24-32-524"></div>
+      <div><label class="lbl">Remarks</label><textarea id="ftr-remarks" rows="2" class="inp" placeholder="Weather hold, VIP pickup, patient evacuation..."></textarea></div>
+
+      <div class="rounded-xl border border-amber-300 bg-amber-50/60 p-4">
+        <h3 class="font-bold text-sm mb-3">💳 Payment &amp; Proof</h3>
+        <div id="pay-fields-f"></div>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-4 border-t border-slate-200">
+        <button type="button" onclick="resetForm()" class="btn border border-slate-300 text-slate-600 hover:bg-slate-100">Reset Form</button>
+        <button type="submit" id="submit-btn" class="btn bg-blue-700 hover:bg-blue-800 text-white shadow">💾 Save Flight Entry</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- DASHBOARD -->
+<section id="tab-dashboard" class="hidden space-y-6">
+  <div class="card p-4 flex flex-wrap items-end justify-between gap-4">
+    <h2 class="font-bold">Flight Operations Dashboard <span class="text-xs font-normal text-slate-400">(canceled flights excluded)</span></h2>
+    <div class="flex items-end gap-2">
+      <div><label class="lbl">Filter Date</label><input type="date" id="dash-date" onchange="renderDash()" class="inp"></div>
+      <button onclick="$('dash-date').value=today();renderDash()" class="btn bg-slate-100 border border-slate-300">Today</button>
+      <button onclick="$('dash-date').value='';renderDash()" class="btn bg-slate-100 border border-slate-300">Show All</button>
+    </div>
+  </div>
+  <div id="kpis" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 card">
+      <div class="bar text-sm font-bold"><span>Service Wise Breakdown</span><span id="dash-label" class="text-xs font-mono font-normal text-slate-300"></span></div>
+      <div class="overflow-x-auto"><table class="w-full text-xs">
+        <thead class="bg-slate-100 text-slate-600 uppercase border-b"><tr><th class="th">Service</th><th class="th">Flights</th><th class="th">Duration</th><th class="th">Rate</th><th class="th text-right">Revenue (incl. GST)</th></tr></thead>
+        <tbody id="svc-body" class="divide-y divide-slate-200"></tbody>
+      </table></div>
+    </div>
+    <div class="card p-5">
+      <h3 class="font-bold text-sm">Flight Hours per Service</h3>
+      <div class="relative h-56 mt-3"><canvas id="svc-chart"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<!-- RECORDS -->
+<section id="tab-records" class="hidden">
+  <div class="card">
+    <div class="bar">
+      <div><h2 class="text-lg font-bold">Flight Time Reports Database</h2><p class="text-xs text-slate-400">Search, edit, print slips, and manage payment proofs.</p></div>
+      <div class="flex gap-2"><label class="btn bg-blue-600 hover:bg-blue-700 text-white text-xs cursor-pointer">Import CSV<input type="file" accept=".csv" class="hidden" onchange="importCSV(this)"></label><button onclick="exportCSV()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs">Export CSV</button></div>
+    </div>
+    <div class="p-4 bg-slate-50 border-b grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <input id="search-input" oninput="renderRecords()" placeholder="Search agency, route, SL, ref..." class="inp text-xs col-span-2 lg:col-span-1">
+      <select id="f-ch" onchange="renderRecords()" class="inp text-xs"></select>
+      <select id="f-sv" onchange="renderRecords()" class="inp text-xs"></select>
+      <select id="f-st" onchange="renderRecords()" class="inp text-xs"></select>
+      <select id="f-pm" onchange="renderRecords()" class="inp text-xs"></select>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-xs">
+      <thead class="bg-slate-100 text-slate-700 uppercase border-b"><tr>
+        <th class="th">SL</th><th class="th">Date</th><th class="th">Aircraft</th><th class="th">Service</th><th class="th">Route</th><th class="th">Agency</th><th class="th">Flight Time</th><th class="th">Amount (incl. GST)</th><th class="th">Flight</th><th class="th">Approval</th><th class="th">Payment &amp; Proof</th><th class="th">Actions</th>
+      </tr></thead>
+      <tbody id="rec-body" class="divide-y divide-slate-200 font-medium"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- RATES -->
+<section id="tab-rates" class="hidden">
+  <div class="card max-w-3xl mx-auto">
+    <div class="bar">
+      <div><h2 class="text-lg font-bold">Rates &amp; Invoice Settings</h2><p class="text-xs text-slate-400">Applies to new entries only; saved FTRs keep the rate they were billed at.</p></div>
+      <button onclick="saveRates()" class="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs">Save Changes</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <p class="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-xs">Tourist Charter (TC) is billed in USD. All other services are billed in Ngultrum (Nu.). Hourly rates are before GST; the GST % is added once, when each flight is entered.</p>
+      <div id="rates-list" class="space-y-3"></div>
+      <div id="inv-cfg" class="space-y-3 pt-4 border-t border-slate-200"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- PAYMENT & PROOF MODAL -->
+<div id="pay-modal" class="hidden fixed inset-0 z-50 bg-slate-900/70 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div class="bar"><div><h3 id="pm-title" class="font-bold"></h3><p id="pm-sub" class="text-xs text-slate-400"></p></div><button onclick="closeM('pay-modal')" class="btn bg-slate-700 hover:bg-slate-600">Close</button></div>
+    <div id="pm-body" class="p-5"></div>
+    <div class="px-5 pb-5 flex justify-end gap-2">
+      <button onclick="closeM('pay-modal')" class="btn border border-slate-300 text-slate-600">Cancel</button>
+      <button onclick="savePayment()" class="btn bg-blue-700 hover:bg-blue-800 text-white">Save Payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMAGE LIGHTBOX -->
+<div id="lb" class="hidden fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4 cursor-zoom-out" onclick="closeM('lb')"><img id="lb-img" class="max-h-full max-w-full rounded-lg bg-white"></div>
+
+<!-- PRINT SLIP -->
+<div id="print-modal" class="hidden fixed inset-0 z-50 bg-slate-900/70 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="no-print bar rounded-t-2xl"><b class="text-sm">Official FTR Slip Preview</b>
+      <div class="flex gap-2"><button onclick="window.print()" class="btn bg-blue-600 hover:bg-blue-700 text-xs">🖨 Print</button><button onclick="closeM('print-modal')" class="btn bg-slate-700 hover:bg-slate-600 text-xs">Close</button></div>
+    </div>
+    <div id="print-area" class="p-8 m-4 border border-slate-300 rounded bg-white text-slate-900">
+      <div class="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-4">
+        <div><span class="text-2xl font-black tracking-tighter text-blue-900">Drukair</span><p class="text-[10px] font-bold uppercase text-slate-600">Royal Bhutan Airlines</p><p class="text-[9px] text-slate-500">A DHI Company</p></div>
+        <div class="text-right"><h2 class="text-sm font-bold">འབྲུག་མཁའ་འགྲུལ་ལས་འཛིན།</h2><h3 class="text-sm font-bold">(Drukair Corporation Limited)</h3><p class="font-extrabold uppercase mt-1 border-b border-slate-400 inline-block">Flight Time Report</p><p class="text-xs font-mono font-bold text-red-600 mt-1">SL. No. <span id="pr-sl"></span></p></div>
+      </div>
+      <p id="pr-svc" class="text-[11px] font-bold text-blue-900 uppercase border-b border-slate-200 pb-2 mb-3"></p>
+      <table class="w-full border-collapse border border-slate-800 text-xs text-center mb-4">
+        <thead><tr class="bg-slate-100 font-bold text-[11px]"><th class="border border-slate-800 p-2">Aircraft Registration</th><th class="border border-slate-800 p-2">Flight Date</th><th class="border border-slate-800 p-2">From</th><th class="border border-slate-800 p-2">To</th><th class="border border-slate-800 p-2">Flight Time (Hr/Mins)</th></tr></thead>
+        <tbody>
+          <tr class="h-12"><td id="pr-ac" class="border border-slate-800 p-2 font-mono font-bold"></td><td id="pr-date" class="border border-slate-800 p-2"></td><td id="pr-from" class="border border-slate-800 p-2"></td><td id="pr-to" class="border border-slate-800 p-2"></td><td id="pr-time" class="border border-slate-800 p-2 font-mono font-bold"></td></tr>
+          <tr><td colspan="4" class="border border-slate-800 p-1.5 font-bold text-right">Total</td><td id="pr-time2" class="border border-slate-800 p-1.5 font-mono font-extrabold"></td></tr>
+        </tbody>
+      </table>
+      <p id="pr-rate" class="text-right font-bold text-xs mb-6"></p>
+      <div class="space-y-2 text-xs mb-8" id="pr-fields"></div>
+      <div class="pt-6 flex justify-between items-end border-t border-slate-300">
+        <div><div class="h-10 border-b border-slate-800 w-40 mb-1 flex items-center justify-center italic text-slate-400 text-xs">[ Signed Electronically ]</div><p class="text-[11px] font-bold">(Duty Officer)</p><p class="text-[10px] text-slate-600 font-semibold">Flight Operation (Dispatch)</p></div>
+        <div class="text-right text-[10px] text-slate-500"><p>PO Box 1219, Paro 12001, Bhutan</p><p>www.drukair.com.bt</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROFORMA INVOICE -->
+<div id="inv-modal" class="hidden fixed inset-0 z-50 bg-slate-900/70 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="no-print bar rounded-t-2xl"><b class="text-sm">Proforma Invoice Preview</b>
+      <div class="flex gap-2"><button onclick="window.print()" class="btn bg-blue-600 hover:bg-blue-700 text-xs">🖨 Print / Save PDF</button><button onclick="closeM('inv-modal')" class="btn bg-slate-700 hover:bg-slate-600 text-xs">Close</button></div>
+    </div>
+    <div id="inv-area" class="p-10 m-4 bg-white text-black" style="font-family:'Times New Roman',Times,serif"></div>
+  </div>
+</div>
+
+<div id="login" class="fixed inset-0 z-[80] bg-slate-900 flex items-center justify-center p-4">
+  <form onsubmit="doLogin(event)" class="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3 shadow-2xl">
+    <h2 class="font-bold text-lg">🚁 Drukair FTR System</h2><p class="text-xs text-slate-500">Sign in with your assigned account.</p>
+    <input id="lg-email" type="email" required placeholder="Email" class="inp"><input id="lg-pw" type="password" required placeholder="Password" class="inp">
+    <p id="lg-err" class="text-xs text-red-600"></p><button class="btn bg-blue-700 hover:bg-blue-800 text-white w-full">Sign in</button>
+  </form>
+</div>
+<div id="toast" class="hidden fixed bottom-5 right-5 z-[70] bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-amber-500/40 text-xs font-semibold"></div>
+
+<script>
+/* ---------- helpers & constants ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (v, c) => c === 'USD'
+  ? '$ ' + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+  : 'Nu. ' + v.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+// local date (Bhutan is UTC+6, so toISOString() gives the wrong day in the early morning)
+const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+const CH = ['A5-BHS', 'A5-BHU', 'A5-BHV'], CAPS = ['HT', 'AB', 'KW', 'ST', 'UD', 'KJ'];
+const SVC = {HEMS:'HEMS (Medical Emergency)', LC:'LC (Local Charter)', 'LC-SUB':'LC-SUB (Subsidized Charter)', 'LC-RGOB':'LC-RGOB (Royal Govt Charter)', TC:'TC (Tourist Charter - USD)'};
+const MODES = {Cash:'Cash', Invoice:'Invoice', Online:'Online / Screenshot'};
+const PST = {Pending:'Pending', Advance:'Advance paid', Paid:'Paid'};
+const FST = ['Complete', 'In-Process', 'Canceled'];
+const FCOL = {Complete:'bg-emerald-100 text-emerald-800', 'In-Process':'bg-amber-100 text-amber-800', Canceled:'bg-red-100 text-red-800'};
+const PCOL = {Paid:'bg-emerald-100 text-emerald-800', Advance:'bg-blue-100 text-blue-800', Pending:'bg-amber-100 text-amber-800'};
+const HINT = {
+  Cash: 'Cash received at dispatch. A photo of the receipt is optional.',
+  Invoice: 'Invoice raised: enter the invoice no. Attach the payment screenshot or receipt when the money arrives (💳 in FTR Records).',
+  Online: 'Attach the transfer screenshot now if it was paid in advance, or add it later from FTR Records.'
+};
+const opt = (o, first) => (first ? `<option value="">${first}</option>` : '') +
+  (Array.isArray(o) ? o : Object.keys(o)).map(k => `<option value="${k}">${Array.isArray(o) ? k : o[k]}</option>`).join('');
+
+/* ---------- state ---------- */
+let rates = {
+  TC:{rate:3700, currency:'USD', name:'Tourist Charter'},
+  HEMS:{rate:120000, currency:'Nu.', name:'Medical Emergency (HEMS)'},
+  LC:{rate:150000, currency:'Nu.', name:'Local Charter'},
+  'LC-SUB':{rate:80000, currency:'Nu.', name:'Subsidized Local Charter'},
+  'LC-RGOB':{rate:130000, currency:'Nu.', name:'Royal Govt Charter'}
+};
+const SB_URL = 'PASTE_SUPABASE_PROJECT_URL', SB_KEY = 'PASTE_SUPABASE_ANON_KEY';
+const sb = supabase.createClient(SB_URL, SB_KEY);
+let me = {email:'', role:''}, apps = {};
+let cfg = {prefix:'DA/HSD/GOCS/12', next:261, gst:5, by:'Drukair', tpn:'C10042982'};
+
+
+// amount payable by the client = base charge + GST, each rounded to 2 decimals
+const gross = v => { const b = Math.round(v * 100) / 100; return Math.round((b + Math.round(b * cfg.gst) / 100) * 100) / 100; };
+// splits an amount that already includes GST back into base + GST (used for display and the invoice only)
+const split = (t, p) => { const base = Math.round(t / (1 + p / 100) * 100) / 100; return {base, gst: Math.round((t - base) * 100) / 100}; };
+
+const calc = (h, m, svc, rt) => {
+  const t = h * 60 + m, ro = {...(rates[svc] || {rate:0, currency:'Nu.'})}; if (rt !== undefined) ro.rate = rt;
+  return {hours:h, mins:m, totalMins:t, timeFormatted:`${h}:${String(m).padStart(2,'0')}:00`, revenue:gross(t / 60 * ro.rate), gstPct:cfg.gst, currency:ro.currency, rate:ro.rate};
+};
+let recs = [];
+let proofs = {};              // recordId -> [compressed image data URLs]  (kept in IndexedDB)
+let imgs = {f: [], m: []};    // images being edited: f = entry form, m = payment modal
+let payId = null, chart = null;
+
+const chk = ({error}) => { if (error) { console.error(error); toast(error.code === '23505' ? 'That SL No. is already used - click Reset Form for the next number' : 'NOT SAVED: ' + error.message); } return !error; };
+const push = r => sb.from('ftr_records').upsert({id: r.id, data: r}).then(chk);
+function toast(msg) { const t = $('toast'); t.innerText = msg; t.classList.remove('hidden'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), 3000); }
+const closeM = id => $(id).classList.add('hidden');
+
+/* ---------- payment helpers ---------- */
+const recd = r => r.payStatus === 'Paid' ? (r.paidAmt ?? r.revenue) : r.payStatus === 'Advance' ? (r.paidAmt || 0) : 0;
+// money has been received through invoice/online but no proof image is attached yet
+const missing = r => r.status !== 'Canceled' && r.payMode && r.payMode !== 'Cash' && (r.payStatus === 'Paid' || r.payStatus === 'Advance') && !(proofs[r.id] || []).length;
+const normPay = (p, rev) => ({...p, paidAmt: p.payStatus === 'Paid' ? (p.paidAmt ?? rev) : p.payStatus === 'Advance' ? p.paidAmt : null});
+
+const payFields = p => `
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div><label class="lbl">Payment Mode</label><select id="${p}-mode" class="inp" onchange="payHint('${p}')">${opt(MODES, 'Select mode…')}</select></div>
+    <div><label class="lbl">Payment Status</label><select id="${p}-status" class="inp">${opt(PST)}</select></div>
+    <div><label class="lbl">Amount Received</label><input id="${p}-amt" type="number" min="0" step="0.01" class="inp" placeholder="auto when Paid"></div>
+    <div><label class="lbl">Receipt / Invoice / Txn No.</label><input id="${p}-ref" class="inp"></div>
+  </div>
+  <p id="${p}-hint" class="text-xs text-slate-500 mt-2"></p>
+  <div id="${p}-thumbs" class="flex flex-wrap gap-3 mt-3"></div>
+  <label class="btn bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer inline-block mt-3">📎 Attach screenshot / receipt
+    <input type="file" accept="image/*" multiple class="hidden" onchange="addFiles('${p}', this)"></label>`;
+const payHint = p => { $(p + '-hint').innerText = HINT[$(p + '-mode').value] || 'Choose how this flight is being paid.'; };
+const getPay = p => ({payMode:$(p + '-mode').value, payStatus:$(p + '-status').value, payRef:$(p + '-ref').value.trim(), paidAmt:$(p + '-amt').value === '' ? null : +$(p + '-amt').value});
+const setPay = (p, r) => { $(p + '-mode').value = r.payMode || ''; $(p + '-status').value = r.payStatus || 'Pending'; $(p + '-ref').value = r.payRef || ''; $(p + '-amt').value = r.paidAmt ?? ''; payHint(p); };
+const payError = py => !py.payMode ? 'Select a payment mode' : (py.payStatus === 'Advance' && !py.paidAmt) ? 'Enter the advance amount received' : '';
+
+/* ---------- images: compress, store in IndexedDB ---------- */
+function setProofs(id, arr) {
+  arr = [...arr]; arr.length ? proofs[id] = arr : delete proofs[id];
+  (arr.length ? sb.from('ftr_proofs').upsert({record_id: id, imgs: arr}) : sb.from('ftr_proofs').delete().eq('record_id', id)).then(chk);
+}
+const compress = file => new Promise(res => {
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const s = Math.min(1, 1200 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = im.width * s; c.height = im.height * s;
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+      res(c.toDataURL('image/jpeg', 0.72));
+    };
+    im.onerror = () => res(null); im.src = fr.result;
+  };
+  fr.readAsDataURL(file);
+});
+async function addFiles(p, input) {
+  for (const f of input.files) { const d = await compress(f); if (d) imgs[p].push(d); }
+  input.value = ''; renderThumbs(p);
+}
+const rmImg = (p, i) => { imgs[p].splice(i, 1); renderThumbs(p); };
+const showImg = (ctx, i) => { const s = (imgs[ctx] || proofs[ctx] || [])[i]; if (s) { $('lb-img').src = s; $('lb').classList.remove('hidden'); } };
+const renderThumbs = p => {
+  $(p + '-thumbs').innerHTML = imgs[p].map((s, i) => `<div class="relative"><img src="${s}" onclick="showImg('${p}',${i})" class="h-20 w-20 object-cover rounded-lg border border-slate-300 cursor-zoom-in"><button type="button" onclick="rmImg('${p}',${i})" class="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-600 text-white text-xs leading-none" title="Remove">×</button></div>`).join('');
+};
+
+/* ---------- entry form ---------- */
+function nextSL() { const n = recs.map(r => parseInt(r.sl)).filter(x => !isNaN(x)); $('ftr-sl').value = n.length ? Math.max(...n) + 1 : 6023; }
+function calcForm() {
+  const c = calc(+$('ftr-hours').value || 0, +$('ftr-mins').value || 0, $('ftr-service').value);
+  $('ftr-formatted-time').innerText = c.timeFormatted; $('ftr-computed-mins').innerText = `(${c.totalMins} Mins)`;
+  $('ftr-revenue-display').value = money(c.revenue, c.currency); $('ftr-currency-badge').innerText = c.currency === 'USD' ? 'USD ($)' : 'BTN (Nu.)';
+  const sp = split(c.revenue, c.gstPct); $('ftr-gst-note').innerText = c.gstPct ? `Base ${money(sp.base, c.currency)} + ${c.gstPct}% GST ${money(sp.gst, c.currency)}` : '';
+}
+function resetForm() {
+  $('ftr-form').reset(); $('edit-id').value = '';
+  $('ftr-hours').value = 1; $('ftr-mins').value = 50; $('ftr-service').value = 'TC'; $('ftr-date').value = today();
+  imgs.f = []; setPay('f', {}); renderThumbs('f'); nextSL(); calcForm();
+  $('submit-btn').innerHTML = '💾 Save Flight Entry';
+}
+async function submitForm(e) {
+  e.preventDefault();
+  const id = $('edit-id').value, v = k => $('ftr-' + k).value.trim(), sl = v('sl'), py = getPay('f');
+  const old = id ? recs.find(r => r.id === id) : null, c = calc(+$('ftr-hours').value || 0, +$('ftr-mins').value || 0, v('service'), old && old.service === v('service') ? old.rate : undefined);
+  if (!id && recs.some(r => r.sl === sl)) return toast(`SL No. ${sl} already exists`);
+  if (c.totalMins <= 0 && v('status') !== 'Canceled') return toast('Enter the flight time');
+  if (payError(py)) return toast(payError(py));
+  const rec = {...(id ? recs.find(r => r.id === id) : {}), id: id || Date.now().toString(), sl, date:v('date'), chopper:v('chopper'), service:v('service'), cap:v('cap'), ...c,
+    from:v('from'), to:v('to'), agency:v('agency'), billing:v('billing'), phone:v('phone'), status:v('status'), remarks:v('remarks'), ...normPay(py, c.revenue)};
+  if (!(await push(rec))) return;
+  id ? recs[recs.findIndex(r => r.id === id)] = rec : recs.unshift(rec);
+  setProofs(rec.id, imgs.f);
+  toast(id ? 'FTR updated' : 'FTR saved'); resetForm(); renderAll(); switchTab('records');
+}
+function editRecord(id) {
+  const r = recs.find(x => x.id === id); if (!r) return;
+  $('edit-id').value = id;
+  ['sl','date','chopper','service','cap','hours','mins','from','to','agency','billing','phone','status','remarks'].forEach(k => $('ftr-' + k).value = r[k] ?? '');
+  imgs.f = [...(proofs[id] || [])]; setPay('f', r); renderThumbs('f'); calcForm();
+  $('submit-btn').innerHTML = '✏️ Update Record'; switchTab('entry');
+}
+async function deleteRecord(id) {
+  if (!confirm('Delete this FTR record and its payment proofs?')) return;
+  if (!chk(await sb.from('ftr_records').delete().eq('id', id))) return;
+  await sb.from('ftr_approvals').delete().eq('record_id', id); recs = recs.filter(r => r.id !== id); delete apps[id]; setProofs(id, []); renderAll(); toast('Record deleted');
+}
+
+/* ---------- payment modal ---------- */
+function openPay(id) {
+  const r = recs.find(x => x.id === id); payId = id; imgs.m = [...(proofs[id] || [])];
+  $('pm-title').innerText = `💳 Payment & Proof — FTR ${r.sl}`;
+  $('pm-sub').innerText = `${r.agency} · Payable ${money(r.revenue, r.currency)} (incl. ${r.gstPct ?? cfg.gst}% GST)`;
+  setPay('m', r); renderThumbs('m'); $('pay-modal').classList.remove('hidden');
+}
+async function savePayment() {
+  const r = recs.find(x => x.id === payId), py = getPay('m');
+  if (payError(py)) return toast(payError(py));
+  const nr = {...r, ...normPay(py, r.revenue)}; if (!(await push(nr))) return; Object.assign(r, nr); setProofs(payId, imgs.m);
+  closeM('pay-modal'); renderAll(); toast('Payment updated');
+}
+
+/* ---------- records table ---------- */
+function payCell(r) {
+  if (r.status === 'Canceled') return '<span class="text-slate-400">—</span>';
+  const ps = r.payStatus || 'Pending', im = proofs[r.id] || [];
+  return `<div class="flex flex-wrap gap-1"><span class="badge bg-slate-200 text-slate-700">${MODES[r.payMode] || 'Mode not set'}</span><span class="badge ${PCOL[ps]}">${PST[ps]}</span></div>`
+    + (r.payRef ? `<div class="text-[10px] text-slate-500 mt-1 font-mono">Ref: ${esc(r.payRef)}</div>` : '')
+    + (r.invNo ? `<div class="text-[10px] text-slate-500 mt-1 font-mono">Inv: ${esc(r.invNo)}</div>` : '')
+    + (ps === 'Advance' ? `<div class="text-[10px] text-slate-600 mt-1">Received ${money(recd(r), r.currency)} · Balance ${money(Math.max(r.revenue - recd(r), 0), r.currency)}</div>` : '')
+    + `<div class="flex items-center gap-1 mt-1.5">${im.slice(0, 3).map((s, i) => `<img src="${s}" onclick="showImg('${r.id}',${i})" class="h-10 w-10 object-cover rounded border border-slate-300 cursor-zoom-in">`).join('')}`
+    + (im.length > 3 ? `<span class="text-[10px] font-bold text-slate-500">+${im.length - 3}</span>` : '')
+    + (missing(r) ? '<button onclick="openPay(\'' + r.id + '\')" class="text-[10px] font-bold text-red-600 underline">Proof missing</button>' : '') + '</div>';
+}
+function renderRecords() {
+  const q = $('search-input').value.toLowerCase(), [ch, sv, st, pm] = ['f-ch', 'f-sv', 'f-st', 'f-pm'].map(k => $(k).value);
+  const list = recs.filter(r =>
+    (!q || [r.sl, r.agency, r.from, r.to, r.phone, r.payRef, r.invNo].join(' ').toLowerCase().includes(q)) &&
+    (!ch || r.chopper === ch) && (!sv || r.service === sv) && (!st || r.status === st) &&
+    (!pm || (pm === 'Missing' ? missing(r) : (r.payStatus || 'Pending') === pm)));
+  $('rec-body').innerHTML = list.length ? list.map(r => `<tr class="hover:bg-slate-50">
+    <td class="td font-mono font-bold text-blue-900">${esc(r.sl)}</td>
+    <td class="td whitespace-nowrap">${r.date}</td>
+    <td class="td font-mono font-bold">${r.chopper}<div class="font-sans text-[10px] text-slate-500">CAP ${r.cap}</div></td>
+    <td class="td font-bold">${r.service}</td>
+    <td class="td">${esc(r.from)} → ${esc(r.to)}</td>
+    <td class="td"><div class="font-semibold">${esc(r.agency)}</div><div class="text-[10px] text-slate-400">${esc(r.phone)}</div></td>
+    <td class="td font-mono font-bold whitespace-nowrap">${r.timeFormatted}<div class="text-[10px] font-normal text-slate-400">${r.totalMins}m</div></td>
+    <td class="td font-bold whitespace-nowrap ${r.currency === 'USD' ? 'text-emerald-700' : 'text-amber-700'}">${money(r.revenue, r.currency)}</td>
+    <td class="td"><span class="badge ${FCOL[r.status]}">${r.status}</span></td>
+    <td class="td min-w-[130px]">${apprCell(r)}</td>
+    <td class="td min-w-[180px]">${payCell(r)}</td>
+    <td class="td whitespace-nowrap">${me.role === 'approver' ? '' : `<button class="ic" title="Payment & proof" onclick="openPay('${r.id}')">💳</button>`}<button class="ic" title="Invoice" onclick="openInvoice('${r.id}')">🧾</button><button class="ic" title="Print slip" onclick="openPrint('${r.id}')">🖨</button>${canEdit(r) ? `<button class="ic" title="Edit" onclick="editRecord('${r.id}')">✏️</button><button class="ic" title="Delete" onclick="deleteRecord('${r.id}')">🗑</button>` : ''}</td>
+  </tr>`).join('') : '<tr><td colspan="12" class="text-center py-6 text-slate-400">No FTR records match.</td></tr>';
+}
+
+/* ---------- dashboard ---------- */
+const kpi = (id, label, col) => `<div class="card p-5 border-l-4 ${col}"><p class="text-xs font-bold text-slate-400 uppercase">${label}</p><div id="${id}" class="text-xl font-extrabold mt-1"></div></div>`;
+function renderDash() {
+  const d = $('dash-date').value, L = recs.filter(r => r.status !== 'Canceled' && (!d || r.date === d));
+  $('dash-label').innerText = d ? 'Date: ' + d : 'All logged dates';
+  const S = {}; Object.keys(SVC).forEach(k => S[k] = {n:0, m:0, rev:0});
+  let tm = 0, usd = 0, nu = 0, miss = 0, unpaid = 0; const rc = {USD:0, 'Nu.':0}, due = {USD:0, 'Nu.':0};
+  L.forEach(r => {
+    tm += r.totalMins || 0; r.currency === 'USD' ? usd += r.revenue : nu += r.revenue;
+    const s = S[r.service]; if (s) { s.n++; s.m += r.totalMins || 0; s.rev += r.revenue; }
+    const g = recd(r); rc[r.currency] += g; due[r.currency] += r.payStatus === 'Paid' ? 0 : Math.max(r.revenue - g, 0);
+    if ((r.payStatus || 'Pending') !== 'Paid') unpaid++; if (missing(r)) miss++;
+  });
+  const two = o => `<div class="text-base">${money(o.USD, 'USD')}</div><div class="text-base">${money(o['Nu.'], 'Nu.')}</div>`;
+  $('k-time').innerHTML = `${Math.floor(tm / 60)}h ${tm % 60}m<div class="text-xs font-medium text-slate-500">${tm} total minutes</div>`;
+  $('k-usd').innerText = money(usd, 'USD'); $('k-nu').innerText = money(nu, 'Nu.');
+  $('k-rc').innerHTML = two(rc); $('k-due').innerHTML = two(due);
+  $('k-attn').innerHTML = `${unpaid} not fully paid<div class="text-sm ${miss ? 'text-red-600' : 'text-slate-500'}">${miss} proof${miss === 1 ? '' : 's'} missing</div>`;
+  $('svc-body').innerHTML = Object.entries(S).map(([k, s]) => {
+    const ro = rates[k] || {rate:0, currency:'Nu.'};
+    return `<tr class="font-medium"><td class="td font-bold">${k}</td><td class="td"><span class="badge bg-slate-100 text-slate-700">${s.n} flights</span></td><td class="td font-mono">${Math.floor(s.m / 60)}h ${s.m % 60}m (${s.m}m)</td><td class="td text-slate-500">${ro.currency === 'USD' ? '$' : 'Nu.'} ${ro.rate.toLocaleString('en-IN')}/hr</td><td class="td text-right font-bold ${ro.currency === 'USD' ? 'text-emerald-600' : 'text-amber-600'}">${money(s.rev, ro.currency)}</td></tr>`;
+  }).join('');
+  if (chart) chart.destroy();
+  chart = new Chart($('svc-chart'), {type:'doughnut',
+    data:{labels:Object.keys(S), datasets:[{data:Object.values(S).map(s => (s.m / 60).toFixed(1)), backgroundColor:['#ef4444','#3b82f6','#8b5cf6','#f59e0b','#10b981'], borderWidth:2, borderColor:'#fff'}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{font:{size:10}, padding:10}}, tooltip:{callbacks:{label:c => ` ${c.label}: ${c.raw} flight hours`}}}}});
+}
+
+/* ---------- rates ---------- */
+function renderRates() {
+  $('rates-list').innerHTML = Object.entries(rates).map(([k, o]) => `<div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200"><div><b class="text-sm">${k} – ${o.name}</b><p class="text-xs text-slate-500">Billed in ${o.currency}</p></div><div class="flex items-center gap-2"><span class="text-sm font-bold text-slate-600">${o.currency === 'USD' ? '$' : 'Nu.'}</span><input id="rate-${k}" type="number" min="0" step="100" value="${o.rate}" class="inp w-40 font-bold"><span class="text-xs text-slate-400">/ hour</span></div></div>`).join('');
+}
+function saveRates() {
+  if (me.role !== 'admin') return toast('Only an administrator can change rates and invoice settings');
+  Object.keys(rates).forEach(k => rates[k].rate = parseFloat($('rate-' + k).value) || 0);
+  cfg = {...cfg, prefix: $('cfg-prefix').value.trim() || cfg.prefix, next: parseInt($('cfg-next').value) || cfg.next, gst: parseFloat($('cfg-gst').value) || 0, by: $('cfg-by').value.trim(), tpn: $('cfg-tpn').value.trim()};
+  sb.from('ftr_settings').upsert([{key:'rates', value:rates}, {key:'inv', value:cfg}]).then(chk); sb.from('invoice_counter').update({next:cfg.next}).eq('id', 1).then(chk); calcForm(); renderAll(); toast('Rates and invoice settings updated');
+}
+
+/* ---------- print slip ---------- */
+function openPrint(id) {
+  const r = recs.find(x => x.id === id), ro = rates[r.service] || {rate:0, currency:'Nu.', name:r.service}, n = (proofs[id] || []).length;
+  const set = {sl:r.sl, ac:r.chopper, date:r.date.split('-').reverse().join('/'), from:r.from, to:r.to, time:r.timeFormatted, time2:r.timeFormatted,
+    svc:`✓ Service: ${r.service} (${ro.name})`, rate:`${ro.currency === 'USD' ? 'USD' : 'Nu.'} ${ro.rate.toLocaleString('en-IN')}/- per hour`};
+  Object.entries(set).forEach(([k, v]) => $('pr-' + k).innerText = v);
+  const pay = `${MODES[r.payMode] || 'Not set'} — ${PST[r.payStatus || 'Pending']}${r.payRef ? ' (Ref: ' + r.payRef + ')' : ''}${n ? ' · proof attached' : ''}`;
+  $('pr-fields').innerHTML = [['Point of Contact', r.agency], ['Phone / Contact', r.phone || 'N/A'], ['Captain In-Charge', r.cap], ['Operational Status', r.status], ['Payment', pay], ['Approval', apps[id] ? `${apps[id].status} - ${apps[id].by_email} (${String(apps[id].at).slice(0, 10)})` : 'Draft - not yet submitted']]
+    .map(([a, b]) => `<div class="flex items-baseline"><span class="font-bold w-36 shrink-0">${a}:</span><span class="border-b border-dashed border-slate-800 flex-grow px-2 font-semibold">${esc(b)}</span></div>`).join('');
+  $('print-modal').classList.remove('hidden');
+}
+
+/* ---------- proforma invoice ---------- */
+const renderCfg = () => { $('inv-cfg').innerHTML = `<h3 class="font-bold text-sm">🧾 Invoice Settings</h3>
+  <div class="grid grid-cols-2 gap-3">
+    <div><label class="lbl">Invoice No. Prefix</label><input id="cfg-prefix" class="inp" value="${esc(cfg.prefix)}"></div>
+    <div><label class="lbl">Next Serial No.</label><input id="cfg-next" type="number" min="1" class="inp" value="${cfg.next}"></div>
+    <div><label class="lbl">GST %</label><input id="cfg-gst" type="number" min="0" step="0.1" class="inp" value="${cfg.gst}"></div>
+    <div><label class="lbl">Prepared By</label><input id="cfg-by" class="inp" value="${esc(cfg.by)}"></div>
+    <div class="col-span-2"><label class="lbl">Drukair TPN</label><input id="cfg-tpn" class="inp" value="${esc(cfg.tpn)}"></div>
+  </div>
+  <p class="text-xs text-slate-500">Numbers are issued as Prefix/Year/Serial (e.g. DA/HSD/GOCS/12/2026/261). The serial goes up by one each time a new invoice is generated; reopening an FTR's invoice keeps its number. GST is added only in the dispatch entry; the invoice just shows it split out.</p>`; };
+const MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const ord = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th','st','nd','rd'][n % 10 > 3 ? 0 : n % 10]);
+const dfmt = (s, comma) => { const [y, m, d] = s.split('-').map(Number); return comma ? `${ord(d)}, ${MON[m - 1]} ${y}` : `${ord(d)} ${MON[m - 1]}, ${y}`; };
+const W1 = 'ZERO ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT NINE TEN ELEVEN TWELVE THIRTEEN FOURTEEN FIFTEEN SIXTEEN SEVENTEEN EIGHTEEN NINETEEN'.split(' ');
+const W10 = ',,TWENTY,THIRTY,FORTY,FIFTY,SIXTY,SEVENTY,EIGHTY,NINETY'.split(',');
+const words = n => n < 20 ? W1[n] : n < 100 ? W10[n / 10 | 0] + (n % 10 ? ' ' + W1[n % 10] : '')
+  : n < 1e3 ? W1[n / 100 | 0] + ' HUNDRED' + (n % 100 ? ' ' + words(n % 100) : '')
+  : n < 1e6 ? words(n / 1e3 | 0) + ' THOUSAND' + (n % 1e3 ? ' ' + words(n % 1e3) : '')
+  : words(n / 1e6 | 0) + ' MILLION' + (n % 1e6 ? ' ' + words(n % 1e6) : '');
+async function openInvoice(id) {
+  const r = recs.find(x => x.id === id);
+  if (r.status === 'Canceled' || !r.totalMins) return toast('No invoice for a canceled or zero-time flight');
+  if (!r.invNo) {
+    const {data: n, error} = await sb.rpc('next_invoice'); if (!chk({error})) return;
+    const nr = {...r, invDate: today(), invNo: `${cfg.prefix}/${today().slice(0, 4)}/${n}`};
+    if (!(await push(nr))) return;
+    Object.assign(r, nr); cfg.next = n + 1; renderCfg(); renderRecords();
+  }
+  const usd = r.currency === 'USD', cur = usd ? 'USD' : 'Nu.', fa = v => Number.isInteger(v) ? String(v) : v.toFixed(2);
+  const pct = r.gstPct ?? cfg.gst, tot = Math.round(r.revenue * 100) / 100, {base, gst} = split(tot, pct);
+  const whole = Math.floor(tot), cents = Math.round((tot - whole) * 100);
+  const inWords = `${cur.toUpperCase()} ${words(whole)}${cents ? ' AND ' + words(cents) + (usd ? ' CENTS' : ' CHETRUM') : ''} ONLY`;
+  const b = t => `<b style="font-family:Arial,Helvetica,sans-serif;font-weight:600">${t}</b>`;
+  const client = esc(r.agency) + (r.billing ? ', ' + esc(r.billing) : '');
+  const bank = usd ? `To transfer money to Bhutan National Bank from any place outside Bhutan &amp; India, Please request your bank to remit money through Bhutan National Bank Ltd, Correspondent Bank as follows;
+    <ol class="list-decimal ml-10 mt-1 space-y-1">
+      <li>Bank Address: Standard Chartered Bank Ltd., (Correspondent Bank) One Madison Avenue, New York, NY 10010-3603<br>SWIFT Code: SCBLUS33<br>CHIPS ABA: 0256<br>FED ABA: 026002561</li>
+      <li>Beneficiary Bank Account: ${b('358-202-171-9001(USD A/C)')}</li>
+      <li>Beneficiary Bank: Bhutan National Bank, P.O Box 439, GPO Building, Chang Lam, Thimphu, Bhutan<br>SWIFT Code: BNBTBTBT</li>
+      <li>Beneficiary/ Ultimate Beneficiary Account #: ${b('640126291')} of Drukair Corporation Limited, maintained with BNBL, Paro, Bhutan</li>
+    </ol><div class="mt-3">Kindly note that ${b('BANK CHARGES')} (If any) shall be borne by customer</div>`
+    : `Beneficiary Account #: ${b('640126291')} of Drukair Corporation Limited, maintained with BNBL, Paro, Bhutan`;
+  const amt = `${cur} ${fa(tot)}/-`;
+  $('inv-area').innerHTML = `
+  <div class="flex items-center justify-between" style="color:#e8651c">
+    <div><div style="font:700 46px/1 Georgia,serif">Drukair</div><div style="font:700 13px Georgia,serif">Royal Bhutan Airlines</div><div style="font:9px Arial,sans-serif;color:#64748b">A <b>DHI</b> company</div></div>
+    <div class="text-center"><div class="text-2xl font-bold">འབྲུག་མཁའ་འགྲུལ་ལས་འཛིན།</div><div class="text-xl font-bold">(Drukair Corporation Limited)</div></div>
+  </div>
+  <div class="flex justify-between mt-10 text-[15px]">${b(esc(r.invNo))}<span>Date: ${dfmt(r.invDate, true)}</span></div>
+  <p class="text-[15px] mt-1">${b(client)}</p>
+  <p class="text-center text-[15px] mt-1">PROFORMA INVOICE</p>
+  <table class="w-full text-[14px] leading-relaxed" style="border-collapse:collapse;border:1px solid #000">
+    <tr><td class="border border-black text-center italic p-1">PARTICULARS</td><td class="border border-black text-center italic p-1" style="width:150px">AMOUNT (${cur.toUpperCase()})</td></tr>
+    <tr>
+      <td class="border-x border-black p-2 align-top">
+        <div>For the helicopter services booked by ${b(client)} as detailed below;</div>
+        <div class="ml-8 mt-1">Sector: ${b(esc(r.from) + ' to ' + esc(r.to))}</div>
+        <div class="ml-8 mt-5">Date of flight: ${b(dfmt(r.date))}</div>
+        <div class="ml-8 mt-5">Total Flight time: ${b(r.totalMins + ' minutes.')}</div>
+        <div class="ml-8 mt-5">Base Rate: ${b(cur + ' ' + fa(base) + '/-')}<br>${pct ? pct + '% GST: ' + b(cur + ' ' + fa(gst) + '/-') + '<br>' : ''}Payable charter fee: ${b(amt)}${cfg.tpn ? '<br>TPN - ' + esc(cfg.tpn) : ''}</div>
+        <div class="mt-5">${bank}</div>
+      </td>
+      <td class="border-x border-black text-center align-middle font-semibold" style="font-family:Arial,Helvetica,sans-serif">${amt}</td>
+    </tr>
+    <tr><td class="border border-black p-3" style="font-family:Arial,Helvetica,sans-serif">${inWords}</td><td class="border border-black text-center font-semibold" style="font-family:Arial,Helvetica,sans-serif">${amt}</td></tr>
+  </table>
+  <p class="mt-1 text-[14px]">${b('Prepared By: ' + esc(cfg.by))}</p>
+  <p class="text-center text-[12px] mt-12">PO Box 1219, Paro 12001, Bhutan<br>www.drukair.com.bt</p>`;
+  $('inv-modal').classList.remove('hidden');
+}
+
+/* ---------- CSV ---------- */
+function exportCSV() {
+  const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const head = 'SL No,Date,Chopper,Captain,Service,From,To,Agency,Phone,Flight Time,Total Mins,Amount incl GST,Currency,Flight Status,Payment Mode,Payment Status,Amount Received,Payment Ref,Proofs Attached,Invoice No,Remarks';
+  const rows = recs.map(r => [r.sl, r.date, r.chopper, r.cap, r.service, r.from, r.to, r.agency, r.phone, r.timeFormatted, r.totalMins, r.revenue, r.currency, r.status, MODES[r.payMode] || '', PST[r.payStatus || 'Pending'], recd(r), r.payRef, (proofs[r.id] || []).length, r.invNo, r.remarks].map(q).join(','));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([head + '\n' + rows.join('\n')], {type:'text/csv;charset=utf-8;'}));
+  a.download = `Drukair_FTR_Report_${today()}.csv`; a.click();
+}
+
+/* ---------- tabs & init ---------- */
+const TABS = [['entry', '✏️ Dispatch Entry'], ['dashboard', '📊 Daily Dashboard'], ['records', '📋 FTR Records'], ['rates', '⚙️ Hourly Rates']];
+function switchTab(t) {
+  TABS.forEach(([k]) => {
+    $('tab-' + k).classList.toggle('hidden', k !== t);
+    const n = $('nav-' + k).classList; n.toggle('bg-amber-500', k === t); n.toggle('text-slate-900', k === t); n.toggle('text-slate-300', k !== t);
+  });
+  if (t === 'dashboard') renderDash();
+}
+const renderAll = () => { renderRecords(); renderDash(); };
+
+$('nav').innerHTML = TABS.map(([k, l]) => `<button id="nav-${k}" onclick="switchTab('${k}')" class="btn whitespace-nowrap">${l}</button>`).join('');
+$('ftr-chopper').innerHTML = opt(CH); $('ftr-service').innerHTML = opt(SVC); $('ftr-cap').innerHTML = opt(CAPS); $('ftr-status').innerHTML = opt(FST);
+$('f-ch').innerHTML = opt(CH, 'All Choppers'); $('f-sv').innerHTML = opt(Object.keys(SVC), 'All Services'); $('f-st').innerHTML = opt(FST, 'All Flight Statuses');
+$('f-pm').innerHTML = opt({...PST, Missing:'Proof missing'}, 'All Payments');
+$('pay-fields-f').innerHTML = payFields('f'); $('pm-body').innerHTML = payFields('m');
+$('kpis').innerHTML = kpi('k-time', 'Total Flight Time', 'border-l-blue-600') + kpi('k-usd', 'Tourist Charter Revenue (USD, incl. GST)', 'border-l-emerald-500') + kpi('k-nu', 'Local Services Revenue (Nu., incl. GST)', 'border-l-amber-500')
+  + kpi('k-rc', 'Payments Received', 'border-l-teal-500') + kpi('k-due', 'Outstanding', 'border-l-rose-500') + kpi('k-attn', 'Needs Attention', 'border-l-slate-500');
+$('dash-date').value = today();
+resetForm(); renderRates(); renderCfg(); switchTab('entry'); renderAll();
+
+/* ---------- approval workflow ---------- */
+const ACOL = {Submitted:'bg-blue-100 text-blue-800', Approved:'bg-emerald-100 text-emerald-800', Rejected:'bg-red-100 text-red-800'};
+const canEdit = r => me.role !== 'approver' && (apps[r.id] || {}).status !== 'Approved';
+const bt = (id, st, label, col) => `<button onclick="setAppr('${id}','${st}')" class="text-[10px] font-bold ${col} underline mr-2">${label}</button>`;
+function apprCell(r) {
+  const a = apps[r.id];
+  let h = `<span class="badge ${a ? ACOL[a.status] : 'bg-slate-200 text-slate-600'}">${a ? a.status : 'Draft'}</span>`;
+  if (a) h += `<div class="text-[10px] text-slate-500 mt-1">${esc(a.by_email)} · ${String(a.at).slice(0, 10)}${a.note ? '<br>"' + esc(a.note) + '"' : ''}</div>`;
+  if (me.role !== 'approver' && (!a || a.status === 'Rejected')) h += '<div class="mt-1">' + bt(r.id, 'Submitted', 'Submit for approval', 'text-blue-700') + '</div>';
+  if (me.role === 'approver' && a && a.status !== 'Rejected') h += '<div class="mt-1">' + (a.status === 'Submitted' ? bt(r.id, 'Approved', 'Approve', 'text-emerald-700') : '') + bt(r.id, 'Rejected', a.status === 'Approved' ? 'Reopen' : 'Reject', 'text-red-600') + '</div>';
+  return h;
+}
+async function setAppr(id, status) {
+  let note = '';
+  if (status === 'Rejected') { note = (prompt('Reason (required):') || '').trim(); if (!note) return toast('A reason is required'); }
+  if (status === 'Approved' && !confirm('Approve this FTR? Flight details will be locked.')) return;
+  const row = {record_id: id, status, note, by_email: me.email, at: new Date().toISOString()};
+  if (!chk(await sb.from('ftr_approvals').upsert(row))) return;
+  apps[id] = row; renderRecords(); toast('FTR ' + status.toLowerCase());
+}
+
+/* ---------- CSV import (same columns as Export CSV) ---------- */
+function parseCSV(t) {
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true; else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); f = ''; if (row.some(x => x !== '')) rows.push(row); row = []; }
+    else f += c;
+  }
+  row.push(f); if (row.some(x => x !== '')) rows.push(row); return rows;
+}
+async function importCSV(input) {
+  const file = input.files[0]; input.value = ''; if (!file) return;
+  const [head, ...rows] = parseCSV((await file.text()).replace(/^\uFEFF/, '')), ix = k => head.indexOf(k);
+  const rev = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k]));
+  const out = [], bad = [], have = new Set(recs.map(r => r.sl));
+  rows.forEach((x, n) => {
+    const g = k => (x[ix(k)] ?? '').trim(), sl = g('SL No'), svc = g('Service'), [h, m] = g('Flight Time').split(':').map(Number), amt = parseFloat(g('Amount incl GST'));
+    const err = !sl ? 'SL missing' : have.has(sl) ? 'SL already exists' : !/^\d{4}-\d\d-\d\d$/.test(g('Date')) ? 'date must be YYYY-MM-DD' : !CH.includes(g('Chopper')) ? 'unknown chopper' : !SVC[svc] ? 'unknown service' : !FST.includes(g('Flight Status')) ? 'unknown flight status' : (isNaN(h) || isNaN(m)) ? 'bad flight time' : isNaN(amt) ? 'bad amount' : '';
+    if (err) return bad.push(`line ${n + 2} (SL ${sl || '?'}): ${err}`);
+    have.add(sl);
+    const py = normPay({payMode: rev(MODES)[g('Payment Mode')] || '', payStatus: rev(PST)[g('Payment Status')] || 'Pending', payRef: g('Payment Ref'), paidAmt: parseFloat(g('Amount Received')) || null}, amt);
+    out.push({...calc(h, m, svc), revenue: amt, id: Date.now() + '-' + n, sl, date: g('Date'), chopper: g('Chopper'), cap: g('Captain'), service: svc, from: g('From'), to: g('To'), agency: g('Agency'), phone: g('Phone'), status: g('Flight Status'), remarks: g('Remarks'), ...py});
+  });
+  if (!out.length) return alert('Nothing imported.\n\n' + bad.join('\n'));
+  if (!confirm(`Import ${out.length} FTR(s)?` + (bad.length ? `\n\n${bad.length} row(s) will be skipped:\n` + bad.slice(0, 15).join('\n') : ''))) return;
+  if (!chk(await sb.from('ftr_records').upsert(out.map(r => ({id: r.id, data: r}))))) return;
+  await loadAll(); toast(`${out.length} FTR(s) imported`);
+}
+
+/* ---------- sign-in & data load ---------- */
+async function loadAll() {
+  const R = await Promise.all(['ftr_records', 'ftr_proofs', 'ftr_settings', 'ftr_approvals', 'invoice_counter'].map(t => sb.from(t).select('*')));
+  const bad = R.find(x => x.error); if (bad) return toast('Could not load data: ' + bad.error.message);
+  const [r, p, st, a, c] = R.map(x => x.data);
+  recs = r.map(x => x.data).sort((x, y) => y.date.localeCompare(x.date) || (parseInt(y.sl) - parseInt(x.sl)));
+  proofs = {}; p.forEach(x => proofs[x.record_id] = x.imgs);
+  st.forEach(x => { if (x.key === 'rates') rates = x.value; if (x.key === 'inv') cfg = {...cfg, ...x.value}; });
+  if (c[0]) cfg.next = c[0].next;
+  apps = Object.fromEntries(a.map(x => [x.record_id, x]));
+  renderRates(); renderCfg(); renderAll();
+}
+async function startSession(user) {
+  const {data} = await sb.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  me = {email: user.email, role: data ? data.role : ''};
+  if (!['dispatcher', 'approver', 'admin'].includes(me.role)) { await sb.auth.signOut(); $('lg-err').innerText = 'Your account is not activated yet. Ask the administrator.'; return; }
+  $('who').innerText = `${me.email} · ${me.role}`; $('login').classList.add('hidden');
+  if (me.role === 'approver') $('nav-entry').classList.add('hidden');
+  await loadAll(); resetForm(); switchTab(me.role === 'approver' ? 'records' : 'entry');
+}
+async function doLogin(e) {
+  e.preventDefault(); $('lg-err').innerText = '';
+  const {data, error} = await sb.auth.signInWithPassword({email: $('lg-email').value.trim(), password: $('lg-pw').value});
+  error ? $('lg-err').innerText = error.message : startSession(data.user);
+}
+sb.auth.getSession().then(({data}) => data.session && startSession(data.session.user));
+document.addEventListener('visibilitychange', () => { if (!document.hidden && me.role) loadAll(); });
+</script>
+</body>
+</html>
