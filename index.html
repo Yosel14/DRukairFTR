@@ -268,7 +268,7 @@ let rates = {
   'LC-SUB':{rate:80000, currency:'Nu.', name:'Subsidized Local Charter'},
   'LC-RGOB':{rate:130000, currency:'Nu.', name:'Royal Govt Charter'}
 };
-const SB_URL = 'PASTE_SUPABASE_PROJECT_URL', SB_KEY = 'PASTE_SUPABASE_ANON_KEY';
+const SB_URL = 'https://clllgyjeqpohmpnnncxi.supabase.co', SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsbGxneWplcXBvaG1wbm5uY3hpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2MDI3MDgsImV4cCI6MjEwOTE3ODcwOH0.1jgzTPw7RPbrPUPFTjt1zboZewxymYo1mieQP8KHNZM';
 const sb = supabase.createClient(SB_URL, SB_KEY);
 let me = {email:'', role:''}, apps = {};
 let cfg = {prefix:'DA/HSD/GOCS/12', next:261, gst:5, by:'Drukair', tpn:'C10042982'};
